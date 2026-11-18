@@ -14,21 +14,31 @@ from eninesites.lib.jsonvalue import Json
 
 
 class LoginRoot(TypedDict):
-    """What ``login`` returns: the project the key was stored under, and the check it passed."""
+    """What ``login`` returns: the project the credential was stored under, and its check.
+
+    ``auth`` is ``api_key`` or ``browser``; ``api_key`` is that credential, redacted.
+    """
 
     project_name: str
     config_path: str
     base_url: str
+    auth: str
     api_key: str | None
     sites: int
 
 
 class LogoutRoot(TypedDict):
-    """What ``logout`` returns: the projects whose key was removed (empty: none was stored)."""
+    """What ``logout`` returns: the projects whose credential was removed (empty: none was).
+
+    ``revoked`` names those whose browser login the server confirmed it revoked;
+    ``revoke_failed`` those whose browser login it did not (removed here all the same).
+    """
 
     project_name: str
     all: bool
     cleared: list[str]
+    revoked: list[str]
+    revoke_failed: list[str]
     config_path: str
     env_key_set: bool
 
@@ -42,6 +52,10 @@ class ConfigRoot(TypedDict):
     config_exists: bool
     base_url: str
     base_url_source: str
+    #: ``api_key``, ``browser`` or None; ``token_expires`` is a browser login's access token
+    #: expiry (ISO 8601). It renews itself on use, so an expired one is not a problem.
+    auth: str | None
+    token_expires: str | None
     api_key: str | None
     api_key_source: str | None
     site: str | None

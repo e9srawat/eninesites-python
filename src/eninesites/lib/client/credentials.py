@@ -5,7 +5,9 @@ One precedence for every setting, in the Stripe CLI's shape (``Profile.GetAPIKey
 config file, then the built-in default.
 
 - project: ``--project-name``, ``ENINESITES_PROJECT_NAME``, else ``default``.
-- API key: ``--api-key``, ``ENINESITES_API_KEY``, the profile's ``api_key``; no default.
+- API key: ``--api-key``, ``ENINESITES_API_KEY``, the profile's ``api_key``, else the
+  profile's browser login (``oauth_access_token``, sent as ``Bearer``); no default. A
+  profile holds one or the other: ``login`` of either kind replaces the other.
 - base URL: ``--base-url``, ``ENINESITES_BASE_URL``, the profile's ``base_url``, else
   ``https://eninesites.com`` (the platform host; the API answers nowhere else).
 - site: ``--domain``, ``ENINESITES_SITE``, the profile's ``site`` (``site select``); no default.
@@ -13,8 +15,9 @@ config file, then the built-in default.
 One deliberate departure from Stripe: its ``STRIPE_API_KEY`` beats ``--api-key``. Here the
 flag wins, because a flag typed on this command is the more specific instruction.
 
-The key is the server's ``CustomToken``, sent as ``Authorization: Token <key>``. It is never
-printed; ``redact`` is the only form that reaches output.
+An API key is the server's ``CustomToken``, sent as ``Authorization: Token <key>``; a browser
+login's token is an OAuth access token, sent as ``Authorization: Bearer <token>``. Neither is
+ever printed; ``redact`` is the only form that reaches output.
 """
 
 from __future__ import annotations
@@ -50,6 +53,9 @@ class Settings:
     base_url_source: str
     site: str | None
     site_source: str | None
+    #: How ``api_key`` is sent: ``"token"`` (an API key) or ``"bearer"`` (a browser login's
+    #: OAuth access token, taken from the profile).
+    auth: str = "token"
 
 
 def _pick(
@@ -79,6 +85,13 @@ def resolve(
     path = config.config_path()
     profile = config.load(path).get(project, {})
     key, key_source = _pick(api_key, ENV_API_KEY, profile.get("api_key"))
+    auth = "token"
+    if key is None and profile.get("oauth_access_token"):
+        key, key_source, auth = (
+            profile["oauth_access_token"],
+            "config (browser login)",
+            "bearer",
+        )
     url, url_source = _pick(
         base_url, ENV_BASE_URL, profile.get("base_url"), DEFAULT_BASE_URL
     )
@@ -94,6 +107,7 @@ def resolve(
         base_url_source=url_source,
         site=chosen,
         site_source=site_source,
+        auth=auth,
     )
 
 
@@ -127,12 +141,14 @@ def require_key(settings: Settings) -> str:
         raise ApiError(
             f'You provided the project name "{settings.project_name}" (either via the '
             f'"--project-name" flag or the "{ENV_PROJECT}" environment variable), but no '
-            "API key for that project was found. Run "
-            f"`python -m eninesites login --project-name={settings.project_name}`."
+            "API key or browser login for that project was found. Run "
+            f"`python -m eninesites login --browser --project-name={settings.project_name}`"
+            " or log in with a key."
         )
     raise ApiError(
-        "You have not configured an API key yet. Run `python -m eninesites login`, "
-        f"set {ENV_API_KEY}, or pass --api-key <key>."
+        "You have not logged in yet. Run `python -m eninesites login --browser`, or "
+        f"`python -m eninesites login` with an API key, set {ENV_API_KEY}, or pass "
+        "--api-key <key>."
     )
 
 

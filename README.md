@@ -65,14 +65,26 @@ pip uninstall eninesites
 
 ## Authentication
 
-The CLI authenticates with an eninesites API key, sent as `Authorization: Token <key>`. An
-eninesites operator issues keys; there is no browser sign-in for the API.
+Sign in through your browser, the way the eninesites MCP connector does, or use an API key.
+
+```sh
+python -m eninesites login --browser       # opens the browser; sign in and approve
+```
+
+A browser login sends `Authorization: Bearer <token>`. The CLI listens on `127.0.0.1` for the
+browser's answer, so the browser must run on the same machine; it gives up after 5 minutes.
+The token renews itself when it expires, and `logout` revokes it at the server. Only a plan
+with API access can approve a login. Running two commands at once is safe: the config file is
+locked while a token is renewed.
+
+An API key is sent as `Authorization: Token <key>`; use one where there is no browser, such as
+a server's cron job. Logging in with either kind replaces the other.
 
 ```sh
 python -m eninesites login                 # paste the key at the hidden prompt
 printf %s "$KEY" | python -m eninesites login   # or pipe it, for scripts and cron
-python -m eninesites config                # which key, base URL and site a command uses
-python -m eninesites logout                # remove the stored key (--all: every project)
+python -m eninesites config                # which login, base URL and site a command uses
+python -m eninesites logout                # remove the stored login (--all: every project)
 ```
 
 `login` checks the key against the server before it stores it. Every command that talks to

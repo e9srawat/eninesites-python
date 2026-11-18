@@ -20,7 +20,8 @@ def print_login(result: LoginRoot) -> None:
         f"> Done! The eninesites CLI is configured for project {result['project_name']} "
         f"at {result['base_url']} ({result['sites']} site(s) reachable)."
     )
-    text.line(f"Key {result['api_key']} saved to {result['config_path']}")
+    what = "Browser login" if result["auth"] == "browser" else "Key"
+    text.line(f"{what} {result['api_key']} saved to {result['config_path']}")
 
 
 def print_logout(result: LogoutRoot) -> None:
@@ -33,6 +34,15 @@ def print_logout(result: LogoutRoot) -> None:
         text.line("Credentials have been cleared for the default project.")
     else:
         text.line(f"Credentials have been cleared for {result['project_name']}.")
+    if result["revoked"]:
+        text.line(
+            f"Browser login revoked at the server: {', '.join(result['revoked'])}."
+        )
+    if result["revoke_failed"]:
+        text.line(
+            "Note: the server did not confirm revoking the browser login of "
+            f"{', '.join(result['revoke_failed'])}; it was removed from this machine anyway."
+        )
     if result["env_key_set"]:
         text.line(
             "Note: ENINESITES_API_KEY is still set in this environment and still used."
@@ -53,7 +63,11 @@ def print_config(result: ConfigRoot) -> None:
             "project": shown(result["project_name"], result["project_source"]),
             "config file": f"{result['config_path']}{exists}",
             "base url": shown(result["base_url"], result["base_url_source"]),
+            "login": {"api_key": "API key", "browser": "browser login"}.get(
+                result["auth"] or "", "(not logged in)"
+            ),
             "api key": shown(result["api_key"], result["api_key_source"]),
+            "token expires": result["token_expires"] or "-",
             "site": shown(result["site"], result["site_source"]),
         }
     )

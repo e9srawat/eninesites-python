@@ -15,14 +15,23 @@ The file holds a secret, so it is written stricter than Stripe writes its own: t
 0700, the file 0600 from the moment it exists (a temporary file chmodded before the rename),
 and never through a symlink. Reading uses ``tomllib``; writing uses the small serializer
 below, because the standard library has no TOML writer and every value here is a string.
+
+Every read-modify-write holds an exclusive ``flock`` on ``config.toml.lock`` beside the file
+(``locked``), so two CLI processes -- a cron job renewing its OAuth token while you run
+``site select`` -- cannot lose each other's change. ``update_profile`` takes the lock; code that
+already holds it calls ``update_profile_locked``, because a second ``flock`` on a second open
+of the same file blocks against the first, even in one process.
 """
 
 from __future__ import annotations
 
+import fcntl
 import os
 import stat
 import tempfile
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from eninesites.errors import ApiError
@@ -33,6 +42,13 @@ FILE_NAME = "config.toml"
 DEFAULT_PROFILE = "default"
 #: The keys a profile may hold. Anything else in the file is kept but never written by us.
 PROFILE_KEYS = ("api_key", "base_url", "site")
+#: A browser login's keys (``lib.client.oauth``); a profile holds these or ``api_key``.
+OAUTH_KEYS = (
+    "oauth_access_token",
+    "oauth_refresh_token",
+    "oauth_expires_at",
+    "oauth_client_id",
+)
 
 Profiles = dict[str, dict[str, str]]
 
@@ -90,9 +106,29 @@ def save(profiles: Profiles, path: Path | None = None) -> Path:
     return path
 
 
-def update_profile(name: str, path: Path | None = None, **changes: str | None) -> Path:
-    """Set (a value) or remove (``None``) keys of one profile and write the file."""
+@contextmanager
+def locked(path: Path | None = None) -> Iterator[Path]:
+    """Hold the config file's exclusive lock; yields the config file's path."""
     path = path or config_path()
+    if path.is_symlink():
+        raise ApiError(f"refusing to write the config file through a symlink: {path}")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield path
+    finally:
+        os.close(fd)  # closing the descriptor releases the lock
+
+
+def update_profile(name: str, path: Path | None = None, **changes: str | None) -> Path:
+    """Set (a value) or remove (``None``) keys of one profile and write the file, locked."""
+    with locked(path) as held:
+        return update_profile_locked(name, held, **changes)
+
+
+def update_profile_locked(name: str, path: Path, **changes: str | None) -> Path:
+    """``update_profile`` for a caller that already holds ``locked(path)``."""
     profiles = load(path)
     table = profiles.setdefault(name, {})
     for key, value in changes.items():

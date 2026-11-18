@@ -4,10 +4,12 @@ Every surface (this noun's cli, an MCP tool, a REST route) calls these functions
 nothing below them. Each verb is one function returning one result type from
 ``lib.results``, plain JSON. A request the api cannot run raises ``ApiError``.
 
-``login`` validates a key against the server (``GET /api/v1/site/``) and only then stores it
-in the profile; ``logout`` removes it; ``config`` reports what a command would use. The key
-is the server's ``CustomToken`` (``Authorization: Token <key>``), minted by an eninesites
-operator; there is no browser pairing flow on the server to log in through.
+``login`` stores one credential per profile: an API key (the server's ``CustomToken``, sent
+as ``Token``), or with ``--browser`` a browser login (OAuth tokens, sent as ``Bearer``;
+``lib.client.oauth``). Either is checked against the server (``GET /api/v1/site/``) before it
+is stored, and storing one removes the other; a browser login being dropped is revoked at the
+server first, best effort. ``logout`` removes it the same way; ``config`` reports what a
+command would use.
 
 ``describe`` reports every command as data, for an agent that would otherwise read 87
 ``--help`` pages. It is the one api function that reads the cli surface, because the cli is
@@ -28,7 +30,7 @@ from typing import Any
 
 from eninesites.errors import ApiError, ErrorResult
 from eninesites.lib import dryrun
-from eninesites.lib.client import config, credentials
+from eninesites.lib.client import config, credentials, http, oauth
 from eninesites.lib.client.http import Client
 from eninesites.lib.dryrun import PlannedRequest, writes
 from eninesites.lib.jsonvalue import Json
@@ -65,73 +67,112 @@ def login_root(
     api_key: str | None = None,
     base_url: str | None = None,
     project_name: str | None = None,
+    browser: bool = False,
     dry_run: bool = False,
 ) -> LoginRoot | PlannedRequest:
-    """Check ``api_key`` against the server, then store it in the project's profile.
+    """Check a credential against the server, then store it in the project's profile.
 
-    The key must be given (the cli asks for it, hidden, or reads it from stdin); a key from
-    the environment or the file is not "logged in" again. ``--base-url``, when given, is
-    stored beside the key, so a dev-server profile keeps pointing at the dev server. A key
-    the server refuses is not stored.
+    With ``browser`` the credential comes from the browser login (``oauth.sign_in``);
+    otherwise it is ``api_key`` (the cli asks for it, hidden, or reads it from stdin). A key
+    from the environment or the file is not "logged in" again. ``--base-url``, when given,
+    is stored beside it, so a dev-server profile keeps pointing at the dev server. A
+    credential the server refuses is not stored.
     """
     key = (api_key or "").strip()
-    if not key:
-        raise ApiError(
-            "login: no API key given. Type it at the prompt, pipe it on stdin, or pass "
-            "--api-key <key>. An eninesites operator issues keys."
-        )
     resolved = credentials.resolve(base_url=base_url, project_name=project_name)
-    settings = dataclasses.replace(resolved, api_key=key, api_key_source="flag")
-    sites = Client(settings).get("/api/v1/site/")
+    keys: dict[str, str] = {}
+    if browser:
+        if key:
+            raise ApiError("login: give an API key or --browser, not both")
+        if dry_run:
+            raise dryrun.Planned("POST", oauth.REGISTER_PATH, body=oauth.registration())
+        keys = oauth.sign_in(resolved.base_url, http.transport)
+        settings = dataclasses.replace(
+            resolved,
+            api_key=keys["oauth_access_token"],
+            api_key_source="browser login",
+            auth="bearer",
+        )
+        changes: dict[str, str | None] = {**keys, "api_key": None}
+    else:
+        if not key:
+            raise ApiError(
+                "login: no API key given. Type it at the prompt, pipe it on stdin, pass "
+                "--api-key <key>, or sign in with `python -m eninesites login --browser`."
+            )
+        settings = dataclasses.replace(
+            resolved, api_key=key, api_key_source="flag", auth="token"
+        )
+        changes = {"api_key": key, **oauth.discarded()}
+    try:
+        sites = Client(settings).get("/api/v1/site/")
+    except ApiError:
+        if browser:  # the new login works nowhere, so it is not left live on the server
+            oauth.revoke(settings.base_url, keys, http.transport)
+        raise
     if dry_run:
         stored = {"profile": settings.project_name, "api_key": credentials.redact(key)}
         if base_url:
             stored["base_url"] = settings.base_url
         raise dryrun.Planned("WRITE", str(settings.config_path), body=stored)
-    path = config.update_profile(
-        settings.project_name,
-        api_key=key,
-        base_url=settings.base_url if base_url else _stored_base_url(settings),
-    )
+    with config.locked(settings.config_path) as path:
+        old = config.load(path).get(settings.project_name, {})
+        if old.get("oauth_access_token") != changes.get("oauth_access_token"):
+            oauth.revoke(old.get("base_url") or settings.base_url, old, http.transport)
+        config.update_profile_locked(
+            settings.project_name,
+            path,
+            base_url=settings.base_url if base_url else old.get("base_url"),
+            **changes,
+        )
     return {
         "project_name": settings.project_name,
         "config_path": str(path),
         "base_url": settings.base_url,
-        "api_key": credentials.redact(key),
+        "auth": "browser" if browser else "api_key",
+        "api_key": credentials.redact(settings.api_key),
         "sites": len(sites) if isinstance(sites, list) else 0,
     }
-
-
-def _stored_base_url(settings: credentials.Settings) -> str | None:
-    """The base URL already stored in the profile, kept as it is when ``--base-url`` is absent."""
-    return (
-        config.load(settings.config_path).get(settings.project_name, {}).get("base_url")
-    )
 
 
 @writes
 def logout_root(
     *, project_name: str | None = None, all_: bool = False, dry_run: bool = False
 ) -> LogoutRoot | PlannedRequest:
-    """Remove the stored key from the project's profile, or from every profile with ``--all``.
+    """Remove the stored credential from the project's profile, or every profile with ``--all``.
 
-    The profile's other settings (``base_url``, ``site``) stay, as Stripe's logout keeps
-    non-auth fields. A key in ``ENINESITES_API_KEY`` is not the file's to remove; the
-    result says when one is still set.
+    A browser login is revoked at the server first, best effort: ``revoked`` names the
+    profiles the server confirmed, and the tokens are removed from the file either way. The
+    profile's other settings (``base_url``, ``site``) stay, as Stripe's logout keeps non-auth
+    fields. A key in ``ENINESITES_API_KEY`` is not the file's to remove; the result says
+    when one is still set.
     """
     project = credentials.resolve(project_name=project_name).project_name
-    path = config.config_path()
-    profiles = config.load(path)
-    names = sorted(profiles) if all_ else [project]
-    cleared = [n for n in names if profiles.get(n, {}).get("api_key")]
-    if dry_run and cleared:
-        raise dryrun.Planned("REMOVE", str(path), body={"api_key": cleared})
-    for name in cleared:
-        config.update_profile(name, path, api_key=None)
+    with config.locked() as path:
+        profiles = config.load(path)
+        names = sorted(profiles) if all_ else [project]
+        cleared = [
+            n
+            for n in names
+            if profiles.get(n, {}).get("api_key")
+            or profiles.get(n, {}).get("oauth_access_token")
+        ]
+        if dry_run and cleared:
+            raise dryrun.Planned("REMOVE", str(path), body={"api_key": cleared})
+        revoked: list[str] = []
+        revoke_failed: list[str] = []
+        for name in cleared:
+            if profiles[name].get("oauth_access_token"):
+                base = credentials.resolve(project_name=name).base_url
+                ok = oauth.revoke(base, profiles[name], http.transport)
+                (revoked if ok else revoke_failed).append(name)
+            config.update_profile_locked(name, path, api_key=None, **oauth.discarded())
     return {
         "project_name": project,
         "all": all_,
         "cleared": cleared,
+        "revoked": revoked,
+        "revoke_failed": revoke_failed,
         "config_path": str(path),
         "env_key_set": bool(os.environ.get(credentials.ENV_API_KEY)),
     }
@@ -155,11 +196,26 @@ def config_root(
         "config_exists": settings.config_path.is_file(),
         "base_url": settings.base_url,
         "base_url_source": settings.base_url_source,
+        "auth": _auth_of(settings),
+        "token_expires": (
+            config.load(settings.config_path)
+            .get(settings.project_name, {})
+            .get("oauth_expires_at")
+            if settings.auth == "bearer"
+            else None
+        ),
         "api_key": credentials.redact(settings.api_key),
         "api_key_source": settings.api_key_source,
         "site": settings.site,
         "site_source": settings.site_source,
     }
+
+
+def _auth_of(settings: credentials.Settings) -> str | None:
+    """Which kind of credential a command would send: ``api_key``, ``browser`` or none."""
+    if not settings.api_key:
+        return None
+    return "browser" if settings.auth == "bearer" else "api_key"
 
 
 # argparse keeps a parser's actions, and its action classes, on private names and offers no

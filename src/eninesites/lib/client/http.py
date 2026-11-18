@@ -1,7 +1,8 @@
 """The transport: one authenticated JSON request to the eninesites REST API, and its errors.
 
 Wire conventions are the server's ``docs/API.md``: everything under ``/api/v1/``, served
-only on the platform host; ``Authorization: Token <key>`` for a headless caller; success is
+only on the platform host; ``Authorization: Token <key>`` for an API key, or
+``Authorization: Bearer <token>`` for a browser login (``lib.client.oauth``); success is
 the resource itself (or 204 with no body); errors are RFC 9457 problem details
 (``application/problem+json`` with ``code``, ``detail`` and, on validation, ``errors``);
 list endpoints are paginated ``{count, next, previous, results}`` or, on several endpoints,
@@ -16,6 +17,11 @@ In dry-run mode (``connect(..., dry_run=True)``) a GET is still sent, because a 
 resolves something first, and the first other request is not sent: ``Client.request``
 raises ``dryrun.Planned`` carrying it, which the api function's ``dryrun.writes`` turns into
 its result.
+
+A browser login's access token lasts ten hours. When the server refuses it with 401,
+``Client.request`` asks ``oauth.renew`` for a working one and resends the request once: a 401
+means the server did nothing, so resending a write is safe. A dry run never renews, because
+renewing is itself a write.
 
 ``transport`` is the only function that touches the network; tests replace it.
 """
@@ -38,7 +44,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from eninesites.errors import ApiError
 from eninesites.lib import dryrun
 
-from . import credentials
+from . import credentials, oauth
 from .credentials import Settings
 
 TIMEOUT_SECONDS = 60.0
@@ -104,7 +110,8 @@ def transport(req: request.Request, timeout: float) -> Reply:
     except error.HTTPError as exc:
         body = exc.read() if exc.fp is not None else b""
         content_type = exc.headers.get_content_type() if exc.headers else ""
-        return Reply(exc.code, content_type, body, {})
+        headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}
+        return Reply(exc.code, content_type, body, headers)
     except error.URLError as exc:
         if isinstance(exc.reason, TimeoutError):
             raise timed_out(req, timeout) from exc
@@ -198,22 +205,34 @@ class Client:
         url = self.settings.base_url + path
         if query:
             url += "?" + urlencode(query)
-        headers = {
-            **user_agent_headers(),
-            "Accept": "application/json",
-            "Authorization": f"Token {self._key}",
-        }
         data: bytes | None = None
+        content_type: str | None = None
         if files is not None:
-            data, headers["Content-Type"] = multipart(files, form or {})
+            data, content_type = multipart(files, form or {})
         elif body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = request.Request(url, data=data, headers=headers, method=method)
-        reply = transport(req, TIMEOUT_SECONDS)
+            data, content_type = json.dumps(body).encode("utf-8"), "application/json"
+        reply = self._send(method, url, data, content_type)
+        if reply.status == 401 and self.settings.auth == "bearer" and not self.dry_run:
+            self._key = oauth.renew(self.settings, self._key, transport)
+            reply = self._send(method, url, data, content_type)
         if reply.status >= 400:
             raise refusal(method, path, reply)
         return reply
+
+    def _send(
+        self, method: str, url: str, data: bytes | None, content_type: str | None
+    ) -> Reply:
+        """One request with this client's credential, as ``Token`` or ``Bearer``."""
+        scheme = "Bearer" if self.settings.auth == "bearer" else "Token"
+        headers = {
+            **user_agent_headers(),
+            "Accept": "application/json",
+            "Authorization": f"{scheme} {self._key}",
+        }
+        if content_type:
+            headers["Content-Type"] = content_type
+        req = request.Request(url, data=data, headers=headers, method=method)
+        return transport(req, TIMEOUT_SECONDS)
 
     def json(self, method: str, path: str, **kwargs: Any) -> Any:
         """Send one request and decode its JSON body; ``None`` for an empty (204) body."""
@@ -280,7 +299,11 @@ def refusal(method: str, path: str, reply: Reply) -> ApiError:
     errors = None
     if payload is not None:
         code = payload.get("code") or payload.get("error")
-        detail = payload.get("detail") or payload.get("message")
+        detail = (
+            payload.get("detail")
+            or payload.get("message")
+            or payload.get("error_description")
+        )
         errors = payload.get("errors") or None
     message = describe_error(method, path, reply, payload)
     return ApiError(
@@ -301,7 +324,11 @@ def describe_error(
     head = f"{method} {path}: HTTP {reply.status}"
     if payload is not None:
         code = payload.get("code") or payload.get("error")
-        detail = payload.get("detail") or payload.get("message")
+        detail = (
+            payload.get("detail")
+            or payload.get("message")
+            or payload.get("error_description")
+        )
         if code and code != detail:
             head += f" {code}"
         if detail:

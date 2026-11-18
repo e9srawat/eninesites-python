@@ -158,7 +158,7 @@ def test_https_and_loopback_http_are_accepted(url: str, normal: str) -> None:
 
 def test_no_key_says_how_to_provide_one(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ENINESITES_API_KEY")
-    with pytest.raises(ApiError, match="You have not configured an API key yet"):
+    with pytest.raises(ApiError, match="You have not logged in yet.*login --browser"):
         credentials.require_key(_settings())
     with pytest.raises(ApiError, match='project name "dev"'):
         credentials.require_key(_settings(project_name="dev"))

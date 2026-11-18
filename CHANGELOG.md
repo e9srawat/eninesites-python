@@ -12,6 +12,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- `login --browser` signs in through the browser, like the eninesites MCP connector, instead
+  of pasting an API key. Later commands send the stored token as `Bearer` and renew it when
+  the server says it has expired. `logout` revokes it, and logging in with a key replaces it.
+  `config` shows which kind of login a profile uses (`auth`) and when its token expires.
+
 - The README (under "For agents and scripts") and AGENTS.md now point to the private
   [eninesites-examples](https://github.com/eninesites/eninesites-examples) repository: real
   sites built and edited with this CLI, one folder per site.

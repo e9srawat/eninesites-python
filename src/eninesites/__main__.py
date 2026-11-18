@@ -57,11 +57,14 @@ def _print_commands() -> None:
 
 def _cmd_login(args: argparse.Namespace) -> int:
     # The key is asked for (hidden) or read from stdin when --api-key is absent: reading
-    # the person's input is the surface's job, so the api takes the key as a value.
+    # the person's input is the surface's job, so the api takes the key as a value. A
+    # browser login has no key to ask for.
+    key = args.api_key or (None if args.browser else prompt.read_api_key())
     result = api.login_root(
-        api_key=args.api_key or prompt.read_api_key(),
+        api_key=key,
         base_url=args.base_url,
         project_name=args.project_name,
+        browser=args.browser,
         dry_run=args.dry_run,
     )
     return json_renderer.show(args, result, plaintext.print_login)
@@ -89,7 +92,7 @@ def _cmd_describe(args: argparse.Namespace) -> int:
 def subcommands() -> list[tuple[str, str]]:
     """One (verb, summary) per verb: the one home of each verb's help text."""
     return [
-        ("login", "Log in to the eninesites CLI with your API key"),
+        ("login", "Log in with your API key, or through your browser with --browser"),
         ("logout", "Log out from the eninesites CLI"),
         ("config", "Show current eninesites CLI configuration"),
         ("describe", "Every command, its flags and its output schema, as data"),
@@ -112,6 +115,11 @@ def parser() -> argparse.ArgumentParser:
     )
     p_login.add_argument(
         "--project-name", help="Config profile to use (default: default)"
+    )
+    p_login.add_argument(
+        "--browser",
+        action="store_true",
+        help="Sign in through your browser instead of pasting an API key",
     )
     p_login.set_defaults(func=_cmd_login)
 
