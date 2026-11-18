@@ -49,7 +49,9 @@ from .credentials import Settings
 REGISTER_PATH = "/o/register/"
 AUTHORIZE_PATH = "/o/authorize/"
 TOKEN_PATH = "/o/token/"
-REVOKE_PATH = "/o/revoke-token/"
+#: django-oauth-toolkit's own path (``oauth2_provider/urls.py``), with an underscore. The
+#: server's discovery document advertises ``/o/revoke-token/``, which answers 404.
+REVOKE_PATH = "/o/revoke_token/"
 #: What the client registers; the listener's port is added at authorize time.
 REDIRECT_URI = "http://127.0.0.1/callback"
 #: The server's default scope is ``read``; the CLI writes, so it asks for both.

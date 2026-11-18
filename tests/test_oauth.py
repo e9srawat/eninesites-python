@@ -222,7 +222,7 @@ def test_an_api_key_in_the_environment_beats_a_browser_login(
 
 @pytest.mark.usefixtures("signed_in")
 def test_logout_revokes_the_browser_login_and_removes_it(server: FakeServer) -> None:
-    server.add("POST", "/o/revoke-token/", None)
+    server.add("POST", "/o/revoke_token/", None)
     result = dryrun.done(root.logout_root())
     assert form(server.last) == {"token": "refresh-1", "client_id": "cid"}
     assert result["revoked"] == ["default"] and not result["revoke_failed"]
@@ -233,7 +233,7 @@ def test_logout_revokes_the_browser_login_and_removes_it(server: FakeServer) -> 
 def test_logout_removes_the_login_even_when_the_revoke_fails(
     server: FakeServer,
 ) -> None:
-    server.add("POST", "/o/revoke-token/", {"error": "server_error"}, status=500)
+    server.add("POST", "/o/revoke_token/", {"error": "server_error"}, status=500)
     result = dryrun.done(root.logout_root())
     assert result["revoke_failed"] == ["default"] and result["cleared"] == ["default"]
     assert "oauth_access_token" not in config.load()["default"]
@@ -246,7 +246,7 @@ def test_logout_all_revokes_every_browser_login(server: FakeServer) -> None:
     result = dryrun.done(root.logout_root(all_=True))
     assert result["cleared"] == ["default", "dev", "local"]
     assert result["revoked"] == ["default", "local"]
-    assert len([c for c in server.calls if c.path == "/o/revoke-token/"]) == 2
+    assert len([c for c in server.calls if c.path == "/o/revoke_token/"]) == 2
 
 
 @pytest.mark.usefixtures("signed_in")
@@ -255,7 +255,7 @@ def test_a_key_login_replaces_and_revokes_a_browser_login(server: FakeServer) ->
     profile = config.load()["default"]
     assert profile["api_key"] == "k" * 40
     assert not set(config.OAUTH_KEYS) & set(profile)
-    assert any(c.path == "/o/revoke-token/" for c in server.calls)
+    assert any(c.path == "/o/revoke_token/" for c in server.calls)
 
 
 @pytest.mark.usefixtures("signed_in")
