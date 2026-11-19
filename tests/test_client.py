@@ -261,6 +261,98 @@ def test_a_success_that_is_not_json_is_refused(server: FakeServer) -> None:
         http.connect().get("/api/v1/site/")
 
 
+# -- rate limits ------------------------------------------------------------------------
+
+THROTTLED = {
+    "code": "throttled",
+    "detail": "Request was throttled. Expected available in 3 seconds.",
+}
+
+
+@pytest.fixture(name="sleeps")
+def fixture_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record each wait instead of sleeping."""
+    waits: list[float] = []
+    monkeypatch.setattr(http, "sleep", waits.append)
+    return waits
+
+
+def test_a_short_429_is_waited_out_and_the_write_sent_again(
+    server: FakeServer, sleeps: list[float]
+) -> None:
+    """A per-minute limit slows the command down instead of stopping it."""
+    path = f"/api/v1/site/{SITE}/tags/"
+    server.add("POST", path, THROTTLED, status=429, headers={"retry-after": "3"})
+    server.add("POST", path, {"slug": "news"}, status=201)
+    client = http.connect()
+    assert client.json("POST", client.site_path("tags"), body={"name": "News"}) == {
+        "slug": "news"
+    }
+    assert sleeps == [3]
+    assert [c.method for c in server.calls] == ["POST", "POST"]
+    assert server.calls[0].body == server.calls[1].body
+
+
+def test_a_long_429_is_reported_at_once_with_the_wait_in_words(
+    server: FakeServer, sleeps: list[float]
+) -> None:
+    """A per-day limit is not waited out: the command stops and says when to rerun."""
+    server.add(
+        "GET", "/api/v1/site/", THROTTLED, status=429, headers={"retry-after": "12000"}
+    )
+    with pytest.raises(ApiError) as caught:
+        http.connect().get("/api/v1/site/")
+    assert not sleeps
+    assert len(server.calls) == 1
+    assert caught.value.status == 429
+    assert "run the command again in 3 h 20 min" in str(caught.value)
+
+
+def test_a_429_that_keeps_coming_is_reported_after_the_last_retry(
+    server: FakeServer, sleeps: list[float]
+) -> None:
+    """Retries are bounded: after RATE_RETRIES waits the 429 is the answer."""
+    server.add(
+        "GET", "/api/v1/site/", THROTTLED, status=429, headers={"retry-after": "1"}
+    )
+    with pytest.raises(ApiError, match="Still limited after waiting 5 times"):
+        http.connect().get("/api/v1/site/")
+    assert sleeps == [1] * http.RATE_RETRIES
+    assert len(server.calls) == http.RATE_RETRIES + 1
+
+
+def test_a_429_without_retry_after_is_not_retried(
+    server: FakeServer, sleeps: list[float]
+) -> None:
+    """With no wait to go by, the client does not guess one."""
+    server.add("GET", "/api/v1/site/", THROTTLED, status=429)
+    with pytest.raises(ApiError, match="HTTP 429"):
+        http.connect().get("/api/v1/site/")
+    assert not sleeps
+    assert len(server.calls) == 1
+
+
+def test_waiting_prints_nothing_when_stderr_is_not_a_terminal(
+    server: FakeServer, sleeps: list[float], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Under --json an agent reads stderr as one JSON document, so the wait is silent."""
+    server.add(
+        "GET", "/api/v1/site/", THROTTLED, status=429, headers={"retry-after": "2"}
+    )
+    server.add("GET", "/api/v1/site/", [])
+    http.connect().get("/api/v1/site/")
+    assert sleeps == [2]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    ("seconds", "words"), [(121, "3 min"), (3600, "1 h"), (12000, "3 h 20 min")]
+)
+def test_in_words(seconds: int, words: str) -> None:
+    """A wait reads as hours and minutes, rounded up."""
+    assert http.in_words(seconds) == words
+
+
 def test_redirects_are_refused_so_the_key_is_not_forwarded() -> None:
     handler = http._NoRedirect()  # pylint: disable=protected-access
     req = request.Request("https://eninesites.com/api/v1/site/")

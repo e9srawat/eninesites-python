@@ -23,7 +23,16 @@ A browser login's access token lasts ten hours. When the server refuses it with 
 means the server did nothing, so resending a write is safe. A dry run never renews, because
 renewing is itself a write.
 
-``transport`` is the only function that touches the network; tests replace it.
+Every call made with a key or a token counts against the user's rate limits, one per minute
+and one per day (the server's ``docs/API.md``, "Rate limits"). The call over a limit gets
+``429`` and a ``Retry-After`` header in seconds. The server refuses it before doing anything
+and does not count it, so resending it, a write included, is safe. ``Client.request`` waits
+the time asked and sends it again, up to ``RATE_RETRIES`` times, when the wait is at most
+``RATE_WAIT_LIMIT`` seconds: that covers the per-minute limit, so a long script slows down
+instead of stopping. A longer wait means the per-day limit, and the 429 is reported at once.
+
+``transport`` is the only function that touches the network, and ``sleep`` the only one that
+waits; tests replace both.
 """
 
 from __future__ import annotations
@@ -32,6 +41,8 @@ import json
 import mimetypes
 import platform
 import re
+import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from email.message import Message
@@ -52,6 +63,13 @@ TIMEOUT_SECONDS = 60.0
 PAGE_SIZE = 200
 #: A runaway guard for pagination: 200 pages of 200 is 40,000 rows.
 MAX_PAGES = 200
+#: The longest ``Retry-After`` the client waits out on a 429, in seconds. A per-minute limit
+#: asks for at most 60; a per-day limit asks for hours, and that is reported instead.
+RATE_WAIT_LIMIT = 120
+#: How many times one request is sent again after a 429 before the 429 is reported.
+RATE_RETRIES = 5
+
+sleep = time.sleep
 
 
 @dataclass(frozen=True)
@@ -215,6 +233,16 @@ class Client:
         if reply.status == 401 and self.settings.auth == "bearer" and not self.dry_run:
             self._key = oauth.renew(self.settings, self._key, transport)
             reply = self._send(method, url, data, content_type)
+        for attempt in range(1, RATE_RETRIES + 1):
+            wait = retry_after(reply)
+            if reply.status != 429 or wait is None or wait > RATE_WAIT_LIMIT:
+                break
+            notify(
+                f"{method} {path}: rate limit reached; waiting {wait}s, then sending it "
+                f"again ({attempt} of {RATE_RETRIES})"
+            )
+            sleep(wait)
+            reply = self._send(method, url, data, content_type)
         if reply.status >= 400:
             raise refusal(method, path, reply)
         return reply
@@ -283,6 +311,21 @@ class Client:
         )
 
 
+def retry_after(reply: Reply) -> int | None:
+    """The seconds a 429's ``Retry-After`` asks for; None when it gives no number."""
+    value = reply.headers.get("retry-after", "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def notify(message: str) -> None:
+    """Say on stderr what the client is waiting for, when a person is watching it.
+
+    Only to a terminal: under ``--json`` an agent reads stderr as one JSON document.
+    """
+    if sys.stderr.isatty():
+        print(message, file=sys.stderr, flush=True)
+
+
 def problem_of(reply: Reply) -> dict[str, Any] | None:
     """The reply's problem details (or any JSON object it carries), else None."""
     try:
@@ -344,7 +387,23 @@ def describe_error(
         head = head.rstrip(".") + (
             ". Check the API key: `python -m eninesites config` shows which one is used."
         )
+    wait = retry_after(reply)
+    if reply.status == 429 and wait is not None:
+        head = head.rstrip(".") + (
+            f". The CLI waits up to {RATE_WAIT_LIMIT}s and this limit lasts longer:"
+            f" run the command again in {in_words(wait)}."
+            if wait > RATE_WAIT_LIMIT
+            else f". Still limited after waiting {RATE_RETRIES} times; run it again later."
+        )
     return head
+
+
+def in_words(seconds: int) -> str:
+    """A wait in hours and minutes, rounded up to the minute: ``3 h 20 min``, ``5 min``."""
+    hours, minutes = divmod(-(-seconds // 60), 60)
+    if not hours:
+        return f"{minutes} min"
+    return f"{hours} h {minutes} min" if minutes else f"{hours} h"
 
 
 def flatten_errors(errors: Any, prefix: str = "") -> str:

@@ -35,4 +35,6 @@ is shared in `src/eninesites/lib/client/`: `http.py` (the one opener, `http.py:7
   this CLI runs from cron. The decision is recorded in `lib/cli.py` `VerbParser`.
 - Name a new noun without a hyphen: racecar builds the noun's word as its Python package name,
   and a hyphen makes it unimportable (`seo` replaced `seo-page` for this reason).
+- A `429` is waited out and resent inside `Client.request` (`RATE_WAIT_LIMIT`, `RATE_RETRIES`),
+  for every verb at once; do not add a retry to a verb or a script.
 - Tests answer from `FakeServer` (`tests/conftest.py:69`); no test reaches a real host.

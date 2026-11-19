@@ -12,6 +12,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Every command waits out the API's per-minute rate limit instead of stopping. On a `429`
+  with a `Retry-After` of at most 120 seconds the client sleeps that long and sends the call
+  again, up to 5 times; the server refuses a limited call before doing anything and does not
+  count it, so resending a write is safe. A longer wait is the per-day limit, reported at once
+  with the time to wait in hours and minutes. Generated scripts such as `create.sh` make
+  hundreds of writes in a row, and before this the first `429` stopped them half-way.
+
 - `login --browser` signs in through the browser, like the eninesites MCP connector, instead
   of pasting an API key. Later commands send the stored token as `Bearer` and renew it when
   the server says it has expired. `logout` revokes it, and logging in with a key replaces it.

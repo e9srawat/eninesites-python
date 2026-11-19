@@ -164,6 +164,13 @@ it usable without reading its help:
 
 Exit codes: 0 done, 1 ran and found something to report, 2 could not run.
 
+**Rate limits.** The server limits how many calls a user makes a minute and a day, and answers
+the call over a limit with `429` and the seconds to wait. The CLI waits that long and sends the
+call again, up to 5 times, when the wait is at most 2 minutes, so a long script slows down
+instead of stopping. In a terminal it says on stderr that it is waiting; under `--json` it
+waits silently. A longer wait is the daily limit: the command stops with code `throttled` and
+says when to run it again.
+
 ### Worked examples
 
 [eninesites-examples](https://github.com/eninesites/eninesites-examples) holds real eninesites
