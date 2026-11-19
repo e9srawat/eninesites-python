@@ -25,8 +25,8 @@ All notable changes to this project are documented in this file. The format is b
   `config` shows which kind of login a profile uses (`auth`) and when its token expires.
 
 - The README (under "For agents and scripts") and AGENTS.md now point to the private
-  [eninesites-examples](https://github.com/eninesites/eninesites-examples) repository: real
-  sites built and edited with this CLI, one folder per site.
+  [eninesites-examples](https://github.com/eninesites/eninesites-examples) repository:
+  eninesites' sample sites built and edited with this CLI, one folder per site.
 
 - `artifact.url list|attach|get|update|detach`: an item's external URLs, in order. `attach
   --name` links a saved URL (`url list`), with `--order` to place it; `update --data` reorders

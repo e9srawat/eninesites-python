@@ -173,12 +173,12 @@ says when to run it again.
 
 ### Worked examples
 
-[eninesites-examples](https://github.com/eninesites/eninesites-examples) holds real eninesites
-sites and the CLI commands behind them. It is private: ask for access through the eninesites
-GitHub organization. Each top-level folder is one site, with its backup (`site.json` and
-`media/original/`), a `create.sh` that builds the site from nothing with this CLI, an `edit.sh`
-of everyday edits that each make a change and then undo it, and a `README.md` on what a rebuilt
-copy leaves out. Start with a site's `edit.sh`. How to run the scripts is in the
+[eninesites-examples](https://github.com/eninesites/eninesites-examples) holds eninesites'
+sample sites and the CLI commands behind them. It is private: ask for access through the
+eninesites GitHub organization. Each top-level folder is one site, with its backup (`site.json`
+and `media/original/`), a `create.sh` that builds the site from nothing with this CLI, and an
+`edit.sh` of everyday edits that each make a change and then undo it. Start with a site's
+`edit.sh`. How to run the scripts is in the
 [examples README](https://github.com/eninesites/eninesites-examples/blob/main/README.md).
 
 ## Commands
