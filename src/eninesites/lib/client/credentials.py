@@ -142,13 +142,13 @@ def require_key(settings: Settings) -> str:
             f'You provided the project name "{settings.project_name}" (either via the '
             f'"--project-name" flag or the "{ENV_PROJECT}" environment variable), but no '
             "API key or browser login for that project was found. Run "
-            f"`python -m eninesites login --browser --project-name={settings.project_name}`"
-            " or log in with a key."
+            f"`python -m eninesites login --project-name={settings.project_name}`"
+            " (add --with-token to log in with a key)."
         )
     raise ApiError(
-        "You have not logged in yet. Run `python -m eninesites login --browser`, or "
-        f"`python -m eninesites login` with an API key, set {ENV_API_KEY}, or pass "
-        "--api-key <key>."
+        "You have not logged in yet. Run `python -m eninesites login` to sign in through "
+        "your browser, or `python -m eninesites login --with-token` with an API key, set "
+        f"{ENV_API_KEY}, or pass --api-key <key>."
     )
 
 

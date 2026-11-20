@@ -19,10 +19,10 @@ All notable changes to this project are documented in this file. The format is b
   with the time to wait in hours and minutes. Generated scripts such as `create.sh` make
   hundreds of writes in a row, and before this the first `429` stopped them half-way.
 
-- `login --browser` signs in through the browser, like the eninesites MCP connector, instead
-  of pasting an API key. Later commands send the stored token as `Bearer` and renew it when
-  the server says it has expired. `logout` revokes it, and logging in with a key replaces it.
-  `config` shows which kind of login a profile uses (`auth`) and when its token expires.
+- `login` signs in through the browser, like the eninesites MCP connector. Later commands
+  send the stored token as `Bearer` and renew it when the server says it has expired. `logout`
+  revokes it, and logging in with a key replaces it. `config` shows which kind of login a
+  profile uses (`auth`) and when its token expires.
 
 - The README (under "For agents and scripts") and AGENTS.md now point to the private
   [eninesites-examples](https://github.com/eninesites/eninesites-examples) repository:
@@ -56,6 +56,11 @@ All notable changes to this project are documented in this file. The format is b
   and `artifact.image update --id --order` moves one. Gallery rows now carry `order`.
 
 ### Changed
+
+- **Breaking:** logging in with an API key now needs `login --with-token` (hidden prompt or
+  stdin) or `login --api-key <key>`. A script that pipes its key to a bare `login` must add
+  `--with-token`; without it the CLI starts a browser login, which gives up after 5 minutes
+  where no browser answers.
 
 - `site load` and `site restore` follow the server's API 2.2.0, where both replace the whole
   site: `load` sends a `.json` export as the request body and keeps the media library (every

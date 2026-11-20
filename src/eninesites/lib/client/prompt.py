@@ -2,7 +2,8 @@
 
 The Stripe CLI's ``login --interactive`` reads the key with the terminal's echo off; this is
 the same, through ``getpass``. When stdin is not a terminal (cron, CI, a pipe) the first line
-of stdin is the key, so ``printf %s "$KEY" | python -m eninesites login`` works unattended.
+of stdin is the key, so ``printf %s "$KEY" | python -m eninesites login --with-token`` works
+unattended.
 Nothing here prints the key.
 """
 

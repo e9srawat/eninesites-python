@@ -81,7 +81,7 @@ def test_browser_login_registers_a_public_client_and_stores_the_tokens(
     server.add("POST", "/o/register/", {"client_id": "cid"}, status=201)
     server.add("POST", "/o/token/", TOKENS)
     server.add("GET", "/api/v1/site/", [])
-    result = dryrun.done(root.login_root(browser=True))
+    result = dryrun.done(root.login_root())
 
     register, token, check = server.calls
     assert register.json()["token_endpoint_auth_method"] == "none"
@@ -104,7 +104,7 @@ def test_a_callback_for_another_login_stores_nothing(
     monkeypatch.setattr(oauth, "open_browser", browser(wrong_state=True))
     server.add("POST", "/o/register/", {"client_id": "cid"}, status=201)
     with pytest.raises(ApiError, match="state mismatch"):
-        root.login_root(browser=True)
+        root.login_root()
     assert [c.path for c in server.calls] == ["/o/register/"]
     assert not config.config_path().exists()
 
@@ -116,7 +116,7 @@ def test_a_refused_approval_is_reported(
     monkeypatch.setattr(oauth, "open_browser", browser(denied))
     server.add("POST", "/o/register/", {"client_id": "cid"}, status=201)
     with pytest.raises(ApiError, match="refused: denied") as caught:
-        root.login_root(browser=True)
+        root.login_root()
     assert caught.value.code == "access_denied"
 
 
@@ -127,19 +127,14 @@ def test_no_answer_from_the_browser_times_out(
     monkeypatch.setattr(oauth, "LOGIN_TIMEOUT", 0.5)
     server.add("POST", "/o/register/", {"client_id": "cid"}, status=201)
     with pytest.raises(ApiError, match="no answer from the browser") as caught:
-        root.login_root(browser=True)
+        root.login_root()
     assert caught.value.code == "timeout"
 
 
 def test_a_dry_run_shows_the_registration_and_sends_nothing(server: FakeServer) -> None:
-    planned = root.login_root(browser=True, dry_run=True)
+    planned = root.login_root(dry_run=True)
     assert (planned.get("method"), planned.get("path")) == ("POST", "/o/register/")
     assert not server.calls
-
-
-def test_a_key_and_browser_together_are_refused() -> None:
-    with pytest.raises(ApiError, match="not both"):
-        root.login_root(api_key="k" * 40, browser=True)
 
 
 @pytest.mark.usefixtures("signed_in")
@@ -183,7 +178,7 @@ def test_an_expired_login_says_to_sign_in_again(server: FakeServer) -> None:
         {"error": "invalid_grant", "error_description": "Invalid refresh token"},
         status=400,
     )
-    with pytest.raises(ApiError, match="login --browser") as caught:
+    with pytest.raises(ApiError, match="eninesites login` to sign in again") as caught:
         site.list_site()
     assert caught.value.code == "invalid_grant"
 

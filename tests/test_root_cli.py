@@ -96,7 +96,7 @@ def test_login_reads_the_key_from_stdin_when_not_a_terminal(
     from eninesites.lib.client import config  # pylint: disable=import-outside-toplevel
 
     monkeypatch.setattr("sys.stdin", io.StringIO("piped-key-0000000000000000\n"))
-    code, _, _ = run_cli(_main(), ["login", "--project-name", "ci"])
+    code, _, _ = run_cli(_main(), ["login", "--with-token", "--project-name", "ci"])
     assert code == 0
     assert config.load()["ci"]["api_key"] == "piped-key-0000000000000000"
 
@@ -107,9 +107,37 @@ def test_login_with_nothing_to_read_refuses(
     import io  # pylint: disable=import-outside-toplevel
 
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    code, out, err = run_cli(_main(), ["login"])
+    code, out, err = run_cli(_main(), ["login", "--with-token"])
     assert (code, out) == (2, "")
     assert "no API key given" in err
+
+
+def test_an_empty_api_key_flag_is_refused_not_a_browser_login(
+    server: FakeServer, run_cli: Callable[..., tuple[int, str, str]]
+) -> None:
+    code, _, err = run_cli(_main(), ["login", "--api-key", ""])
+    assert code == 2 and "no API key given" in err
+    assert not server.calls
+
+
+def test_login_alone_signs_in_through_the_browser_and_reads_no_key(
+    server: FakeServer,
+    monkeypatch: pytest.MonkeyPatch,
+    run_cli: Callable[..., tuple[int, str, str]],
+) -> None:
+    import io  # pylint: disable=import-outside-toplevel
+
+    from eninesites.lib.client import oauth  # pylint: disable=import-outside-toplevel
+
+    opened: list[str] = []
+    monkeypatch.setattr(oauth, "open_browser", opened.append)
+    monkeypatch.setattr(oauth, "LOGIN_TIMEOUT", 0.2)
+    monkeypatch.setattr("sys.stdin", io.StringIO("piped-key-0000000000000000\n"))
+    server.add("POST", "/o/register/", {"client_id": "cid"}, status=201)
+    code, _, err = run_cli(_main(), ["login"])
+    assert code == 2 and "no answer from the browser" in err
+    assert opened and "/o/authorize/" in opened[0]
+    assert [c.path for c in server.calls] == ["/o/register/"]
 
 
 def test_login_keeps_a_dev_base_url_with_the_key(server: FakeServer) -> None:

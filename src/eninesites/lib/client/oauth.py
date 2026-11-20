@@ -60,7 +60,7 @@ CLIENT_NAME = "eninesites CLI"
 #: How long ``sign_in`` waits for the browser before giving up, in seconds.
 LOGIN_TIMEOUT = 300.0
 TIMEOUT_SECONDS = 60.0
-LOGIN_AGAIN = "Run `python -m eninesites login --browser` to sign in again."
+LOGIN_AGAIN = "Run `python -m eninesites login` to sign in again."
 
 
 class Reply(Protocol):  # pylint: disable=too-few-public-methods  # a shape, not a class

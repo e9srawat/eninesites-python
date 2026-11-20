@@ -4,12 +4,12 @@ Every surface (this noun's cli, an MCP tool, a REST route) calls these functions
 nothing below them. Each verb is one function returning one result type from
 ``lib.results``, plain JSON. A request the api cannot run raises ``ApiError``.
 
-``login`` stores one credential per profile: an API key (the server's ``CustomToken``, sent
-as ``Token``), or with ``--browser`` a browser login (OAuth tokens, sent as ``Bearer``;
-``lib.client.oauth``). Either is checked against the server (``GET /api/v1/site/``) before it
-is stored, and storing one removes the other; a browser login being dropped is revoked at the
-server first, best effort. ``logout`` removes it the same way; ``config`` reports what a
-command would use.
+``login`` stores one credential per profile: a browser login (OAuth tokens, sent as
+``Bearer``; ``lib.client.oauth``), or when given a key an API key (the server's
+``CustomToken``, sent as ``Token``). Either is checked against the server
+(``GET /api/v1/site/``) before it is stored, and storing one removes the other; a browser
+login being dropped is revoked at the server first, best effort. ``logout`` removes it the
+same way; ``config`` reports what a command would use.
 
 ``describe`` reports every command as data, for an agent that would otherwise read 87
 ``--help`` pages. It is the one api function that reads the cli surface, because the cli is
@@ -67,23 +67,22 @@ def login_root(
     api_key: str | None = None,
     base_url: str | None = None,
     project_name: str | None = None,
-    browser: bool = False,
     dry_run: bool = False,
 ) -> LoginRoot | PlannedRequest:
     """Check a credential against the server, then store it in the project's profile.
 
-    With ``browser`` the credential comes from the browser login (``oauth.sign_in``);
-    otherwise it is ``api_key`` (the cli asks for it, hidden, or reads it from stdin). A key
+    With no ``api_key`` (None) the credential comes from the browser login
+    (``oauth.sign_in``); otherwise it is ``api_key`` (``--api-key``, or with ``--with-token``
+    the cli asks for it, hidden, or reads it from stdin), and an empty one is refused. A key
     from the environment or the file is not "logged in" again. ``--base-url``, when given,
     is stored beside it, so a dev-server profile keeps pointing at the dev server. A
     credential the server refuses is not stored.
     """
+    browser = api_key is None
     key = (api_key or "").strip()
     resolved = credentials.resolve(base_url=base_url, project_name=project_name)
     keys: dict[str, str] = {}
     if browser:
-        if key:
-            raise ApiError("login: give an API key or --browser, not both")
         if dry_run:
             raise dryrun.Planned("POST", oauth.REGISTER_PATH, body=oauth.registration())
         keys = oauth.sign_in(resolved.base_url, http.transport)
@@ -97,8 +96,9 @@ def login_root(
     else:
         if not key:
             raise ApiError(
-                "login: no API key given. Type it at the prompt, pipe it on stdin, pass "
-                "--api-key <key>, or sign in with `python -m eninesites login --browser`."
+                "login: no API key given. With --with-token, type it at the prompt or "
+                "pipe it on stdin; or pass --api-key <key>. `python -m eninesites login` "
+                "alone signs in through your browser."
             )
         settings = dataclasses.replace(
             resolved, api_key=key, api_key_source="flag", auth="token"

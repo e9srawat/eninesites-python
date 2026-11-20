@@ -65,10 +65,11 @@ pip uninstall eninesites
 
 ## Authentication
 
-Sign in through your browser, the way the eninesites MCP connector does, or use an API key.
+`login` signs you in through your browser, the way the eninesites MCP connector does. To use
+an API key instead, add `--with-token`.
 
 ```sh
-python -m eninesites login --browser       # opens the browser; sign in and approve
+python -m eninesites login                 # opens the browser; sign in and approve
 ```
 
 A browser login sends `Authorization: Bearer <token>`. The CLI listens on `127.0.0.1` for the
@@ -81,13 +82,15 @@ An API key is sent as `Authorization: Token <key>`; use one where there is no br
 a server's cron job. Logging in with either kind replaces the other.
 
 ```sh
-python -m eninesites login                 # paste the key at the hidden prompt
-printf %s "$KEY" | python -m eninesites login   # or pipe it, for scripts and cron
+python -m eninesites login --with-token    # paste the key at the hidden prompt
+printf %s "$KEY" | python -m eninesites login --with-token   # or pipe it, for scripts and cron
 python -m eninesites config                # which login, base URL and site a command uses
 python -m eninesites logout                # remove the stored login (--all: every project)
 ```
 
-`login` checks the key against the server before it stores it. Every command that talks to
+Without `--with-token`, a key piped to `login` is not read: it starts a browser login, which
+gives up after 5 minutes where no browser answers. `login` checks the login against the server
+before it stores it. Every command that talks to
 the API also takes:
 
 | Flag | Environment | Config key | Default |
@@ -156,8 +159,9 @@ it usable without reading its help:
   `errors` holds the server's per-field errors on a validation failure.
 - **`--dry-run` on every write verb** shows the request the verb would send and sends nothing:
   `{"dry_run": true, "method": "DELETE", "path": "...", "body": ...}`. A dry run still sends the
-  verb's GETs, so it needs the server and a key. `login`, `logout` and `site select` show the
-  config-file change instead (`WRITE` or `REMOVE`).
+  verb's GETs, so it needs the server and a key. `login --with-token`, `logout` and `site
+  select` show the config-file change instead (`WRITE` or `REMOVE`); `login` alone shows the
+  client registration it would send (`POST /o/register/`) and opens no browser.
 - **`python -m eninesites describe --json`** lists every command at once: what to type, whether
   it writes, each flag, and the JSON Schema of its output, plus the shapes of a refusal and of a
   dry run.
